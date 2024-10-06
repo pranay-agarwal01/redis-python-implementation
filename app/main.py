@@ -20,7 +20,7 @@ class ResponseParser:
     
 class RedisServer:
     def __init__(self):
-        self.db_data = {}
+        self.db_data: dict[str, list[str]] = {}
         self.dir = None
         self.dbfilename = None
 
@@ -29,9 +29,13 @@ class RedisServer:
         print("DEBUG: Splited Parts", splited_parts)
         resizedb_index = splited_parts.index("xfb")
         key_index = resizedb_index + 4
+        value_index = key_index + 1 
         key_bytes = splited_parts[key_index]
+        value_bytes = splited_parts[value_index]
         key = self.remove_bytes_caracteres(key_bytes)
-        return key
+        value = self.remove_bytes_caracteres(value_bytes)
+        print("DEBUG: key, value", key, value)
+        return key, value
 
     def remove_bytes_caracteres(self, string: str):
         if string.startswith("x"):
@@ -45,8 +49,13 @@ class RedisServer:
             with open(rdb_file_path, "rb") as f:
                 rbd_content = str(f.read())
                 if rbd_content:
-                    return self.parse_redis_file_format(rbd_content)
-        return None
+                    key, value = self.parse_redis_file_format(rbd_content)
+                    self.store_key_value(key, value)
+        else:
+            print("DEBUG: DB File not found")
+    
+    def store_key_value(self, key, value):
+        self.db_data[key] = [value, None]
 
     def command_parser(self, command: str) -> str:
         all_tokens = command.split("\r\n")
@@ -62,8 +71,8 @@ class RedisServer:
         elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "ECHO":
             return ResponseParser.respBulkString(all_tokens[4])
         elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "KEYS":
-            key = self.read_db_file()
-            return ResponseParser.respArray([key])
+            keys = list(self.db_data.keys())
+            return ResponseParser.respArray(keys)
         elif (all_tokens[0] == "*3" or all_tokens[0] == "*5") and all_tokens[1] == "$3" and all_tokens[2] == "SET":
             # creating a list [value, expiry]
             expiry = None
@@ -116,6 +125,9 @@ class RedisServer:
             self.dir = args.dir
         if args.dbfilename is not None:
             self.dbfilename = args.dbfilename
+
+        if self.dir is not None and self.dbfilename is not None:
+            self.read_db_file()
 
         server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
 

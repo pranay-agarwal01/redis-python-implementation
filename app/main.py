@@ -28,19 +28,24 @@ class RedisServer:
         splited_parts = rbd_content.split("\\")
         print("DEBUG: Splited Parts", splited_parts)
         resizedb_index = splited_parts.index("xfb")
+        for i, byte in enumerate(splited_parts):
+            if "xff" in byte:
+                end_index = i
+                break
         key_index = resizedb_index + 4
-        value_index = key_index + 1 
-        key_bytes = splited_parts[key_index]
-        value_bytes = splited_parts[value_index]
-        key = self.remove_bytes_caracteres(key_bytes)
-        value = self.remove_bytes_caracteres(value_bytes)
-        print("DEBUG: key, value", key, value)
-        return key, value
+        for i in range(key_index, end_index, 3):
+            key_bytes = splited_parts[i]
+            value_bytes = splited_parts[i + 1]
+            key = self.remove_bytes_caracteres(key_bytes)
+            value = self.remove_bytes_caracteres(value_bytes)
+            self.store_key_value(key, value)
 
     def remove_bytes_caracteres(self, string: str):
         if string.startswith("x"):
             return string[3:]
         elif string.startswith("t"):
+            return string[1:]
+        elif string.startswith("n"):
             return string[1:]
 
     def read_db_file(self):
@@ -49,8 +54,7 @@ class RedisServer:
             with open(rdb_file_path, "rb") as f:
                 rbd_content = str(f.read())
                 if rbd_content:
-                    key, value = self.parse_redis_file_format(rbd_content)
-                    self.store_key_value(key, value)
+                    self.parse_redis_file_format(rbd_content)
         else:
             print("DEBUG: DB File not found")
     

@@ -104,6 +104,7 @@ class RedisServer:
         parser = argparse.ArgumentParser(description="Redis Server")
         parser.add_argument("--dir", type=str, help="Directory to store data in")
         parser.add_argument("--dbfilename", type=str, help="File to store data in")
+        parser.add_argument("--port", type=int, default=6379, help="Port to run server on")
         return parser.parse_args()
 
     def run(self):
@@ -123,7 +124,7 @@ class RedisServer:
             )
             rdb_parser.parse_rdb_file()
 
-        server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+        server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
 
         while True:
             conn, addr = server_socket.accept()  # wait for client

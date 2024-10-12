@@ -3,86 +3,67 @@ import threading
 import time
 import argparse
 import os
+from .rdb_parser import RDBParser
+
 
 class ResponseParser:
     def respSimpleString(message):
         return f"+{message}\r\n"
-    
+
     def respBulkString(message):
         if message is None:
             return "$-1\r\n"
         return f"${len(message)}\r\n{message}\r\n"
-    
-    def respArray(messages:list):
+
+    def respArray(messages: list):
         if not messages:
             return "*0\r\n"
-        return f"*{len(messages)}" + "\r\n" + "".join([ResponseParser.respBulkString(message) for message in messages])
-    
+        return (
+            f"*{len(messages)}"
+            + "\r\n"
+            + "".join([ResponseParser.respBulkString(message) for message in messages])
+        )
+
+
 class RedisServer:
     def __init__(self):
         self.db_data: dict[str, list[str]] = {}
         self.dir = None
         self.dbfilename = None
 
-    def parse_redis_file_format(self, rbd_content: str):
-        splited_parts = rbd_content.split("\\")
-        print("DEBUG: Splited Parts", splited_parts)
-        resizedb_index = splited_parts.index("xfb")
-        for i, byte in enumerate(splited_parts):
-            if "xff" in byte:
-                end_index = i
-                break
-        key_index = resizedb_index + 4
-        for i in range(key_index, end_index, 3):
-            key_bytes = splited_parts[i]
-            value_bytes = splited_parts[i + 1]
-            key = self.remove_bytes_caracteres(key_bytes)
-            value = self.remove_bytes_caracteres(value_bytes)
-            self.store_key_value(key, value)
-
-    def remove_bytes_caracteres(self, string: str):
-        if string.startswith("x"):
-            return string[3:]
-        elif string.startswith("t"):
-            return string[1:]
-        elif string.startswith("n"):
-            return string[1:]
-
-    def read_db_file(self):
-        rdb_file_path = os.path.join(self.dir, self.dbfilename)
-        if os.path.exists(rdb_file_path):
-            with open(rdb_file_path, "rb") as f:
-                rbd_content = str(f.read())
-                if rbd_content:
-                    self.parse_redis_file_format(rbd_content)
-        else:
-            print("DEBUG: DB File not found")
-    
-    def store_key_value(self, key, value):
-        self.db_data[key] = [value, None]
+    def store_key_value(self, key, value, expiry_time=None):
+        # creating {key: [value, expiry]}
+        self.db_data[key] = [value, expiry_time]
 
     def command_parser(self, command: str) -> str:
         all_tokens = command.split("\r\n")
-        #Sample Commands
+        # Sample Commands
         # *1\r\n$4\r\nPING\r\n
-        # *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n 
+        # *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
         # *3\r\n$3\r\nSET\r\n$3\r\nhey\r\n$3\r\nyou\r\n
         # *5\r\n$3\r\nSET\r\n$9\r\npineapple\r\n$4\r\npear\r\n$2\r\npx\r\n$3\r\n100\r\n
         # *2\r\n$3\r\nGET\r\n$3\r\nhey\r\n
         print("DEBUG: Command Tokens", all_tokens)
         if all_tokens[0] == "*1" and all_tokens[1] == "$4" and all_tokens[2] == "PING":
             return ResponseParser.respSimpleString("PONG")
-        elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "ECHO":
+        elif (
+            all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "ECHO"
+        ):
             return ResponseParser.respBulkString(all_tokens[4])
-        elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "KEYS":
+        elif (
+            all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "KEYS"
+        ):
             keys = list(self.db_data.keys())
             return ResponseParser.respArray(keys)
-        elif (all_tokens[0] == "*3" or all_tokens[0] == "*5") and all_tokens[1] == "$3" and all_tokens[2] == "SET":
-            # creating a list [value, expiry]
+        elif (
+            (all_tokens[0] == "*3" or all_tokens[0] == "*5")
+            and all_tokens[1] == "$3"
+            and all_tokens[2] == "SET"
+        ):
             expiry = None
             if len(all_tokens) > 8 and all_tokens[8] == "px":
                 expiry = int(time.time() * 1000) + int(all_tokens[10])
-            self.db_data[all_tokens[4]] = [all_tokens[6], expiry]
+            self.store_key_value(all_tokens[4], all_tokens[6], expiry)
             return ResponseParser.respSimpleString("OK")
         elif all_tokens[0] == "*2" and all_tokens[1] == "$3" and all_tokens[2] == "GET":
             key = all_tokens[4]
@@ -93,12 +74,16 @@ class RedisServer:
             if is_expired:
                 return ResponseParser.respBulkString(None)
             return ResponseParser.respBulkString(value_list[0])
-        elif all_tokens[0] == "*3" and all_tokens[1] == "$6" and all_tokens[2] == "CONFIG":
+        elif (
+            all_tokens[0] == "*3"
+            and all_tokens[1] == "$6"
+            and all_tokens[2] == "CONFIG"
+        ):
             if all_tokens[4] == "GET":
                 if all_tokens[6] == "dbfilename":
-                    return ResponseParser.respArray(["dbfilename",self.dbfilename])
+                    return ResponseParser.respArray(["dbfilename", self.dbfilename])
                 if all_tokens[6] == "dir":
-                    return ResponseParser.respArray(["dir",self.dir])
+                    return ResponseParser.respArray(["dir", self.dir])
             return ResponseParser.respBulkString(None)
         else:
             return ResponseParser.respBulkString(None)
@@ -107,18 +92,18 @@ class RedisServer:
         with connection:
             connected: bool = True
             while connected:
-                command:str = connection.recv(1024).decode()
+                command: str = connection.recv(1024).decode()
                 print(f"DEBUG: recieved - {command.encode()}")
                 connected = bool(command)
-                response: str  = self.command_parser(command)
-                
+                response: str = self.command_parser(command)
+
                 print(f"DEBUG: returning - {response.encode()}")
                 connection.send(response.encode())
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description="Redis Server")
-        parser.add_argument('--dir', type=str, help='Directory to store data in')
-        parser.add_argument('--dbfilename', type=str, help='File to store data in')
+        parser.add_argument("--dir", type=str, help="Directory to store data in")
+        parser.add_argument("--dbfilename", type=str, help="File to store data in")
         return parser.parse_args()
 
     def run(self):
@@ -131,18 +116,25 @@ class RedisServer:
             self.dbfilename = args.dbfilename
 
         if self.dir is not None and self.dbfilename is not None:
-            self.read_db_file()
+            rdb_file_path = os.path.join(self.dir, self.dbfilename)
+            rdb_parser = RDBParser(
+                rdb_file_path,
+                set_key_value_callback=self.store_key_value,
+            )
+            rdb_parser.parse_rdb_file()
 
         server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
 
         while True:
-            conn, addr = server_socket.accept() # wait for client
+            conn, addr = server_socket.accept()  # wait for client
             thread = threading.Thread(target=self.connect, args=[conn])
             thread.start()
+
 
 def main():
     server = RedisServer()
     server.run()
+
 
 if __name__ == "__main__":
     main()

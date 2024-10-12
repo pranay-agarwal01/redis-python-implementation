@@ -110,7 +110,7 @@ class RedisServer:
     def run(self):
         args = self.parse_args()
         print("Running redis server on port 6379")
-
+ 
         if args.dir is not None:
             self.dir = args.dir
         if args.dbfilename is not None:

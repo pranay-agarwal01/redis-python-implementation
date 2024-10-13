@@ -89,7 +89,7 @@ class RedisServer:
 
         elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "INFO":
             if self.replicaof is not None:
-                return ResponseParser.respBulkString("role:replica")
+                return ResponseParser.respBulkString("role:slave")
             return ResponseParser.respBulkString("role:master")
         else:
             return ResponseParser.respBulkString(None)

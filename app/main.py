@@ -30,6 +30,7 @@ class RedisServer:
         self.db_data: dict[str, list[str]] = {}
         self.dir = None
         self.dbfilename = None
+        self.replicaof: tuple[str, int] | None = None
 
     def store_key_value(self, key, value, expiry_time=None):
         # creating {key: [value, expiry]}
@@ -85,6 +86,11 @@ class RedisServer:
                 if all_tokens[6] == "dir":
                     return ResponseParser.respArray(["dir", self.dir])
             return ResponseParser.respBulkString(None)
+
+        elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "INFO":
+            if self.replicaof is not None:
+                return ResponseParser.respBulkString("role:replica")
+            return ResponseParser.respBulkString("role:master")
         else:
             return ResponseParser.respBulkString(None)
 
@@ -105,6 +111,7 @@ class RedisServer:
         parser.add_argument("--dir", type=str, help="Directory to store data in")
         parser.add_argument("--dbfilename", type=str, help="File to store data in")
         parser.add_argument("--port", type=int, default=6379, help="Port to run server on")
+        parser.add_argument("--replicaof", type=str, help="Replica of host:port")
         return parser.parse_args()
 
     def run(self):
@@ -115,6 +122,9 @@ class RedisServer:
             self.dir = args.dir
         if args.dbfilename is not None:
             self.dbfilename = args.dbfilename
+
+        if args.replicaof is not None:
+            self.replicaof = args.replicaof.split(":")
 
         if self.dir is not None and self.dbfilename is not None:
             rdb_file_path = os.path.join(self.dir, self.dbfilename)

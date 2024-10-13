@@ -1,3 +1,5 @@
+import secrets  
+import string
 import socket
 import threading
 import time
@@ -5,6 +7,8 @@ import argparse
 import os
 from .rdb_parser import RDBParser
 
+def create_random_alphanumeric_string(length: int) -> str:
+    return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 class ResponseParser:
     def respSimpleString(message):
@@ -31,6 +35,9 @@ class RedisServer:
         self.dir = None
         self.dbfilename = None
         self.replicaof: tuple[str, int] | None = None
+        self.master_replid = create_random_alphanumeric_string(40)
+        self.master_repl_offset = 0
+
 
     def store_key_value(self, key, value, expiry_time=None):
         # creating {key: [value, expiry]}
@@ -44,18 +51,22 @@ class RedisServer:
         # *3\r\n$3\r\nSET\r\n$3\r\nhey\r\n$3\r\nyou\r\n
         # *5\r\n$3\r\nSET\r\n$9\r\npineapple\r\n$4\r\npear\r\n$2\r\npx\r\n$3\r\n100\r\n
         # *2\r\n$3\r\nGET\r\n$3\r\nhey\r\n
-        print("DEBUG: Command Tokens", all_tokens)
+        # print("DEBUG: Command Tokens", all_tokens)
+        
         if all_tokens[0] == "*1" and all_tokens[1] == "$4" and all_tokens[2] == "PING":
             return ResponseParser.respSimpleString("PONG")
+        
         elif (
             all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "ECHO"
         ):
             return ResponseParser.respBulkString(all_tokens[4])
+        
         elif (
             all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "KEYS"
         ):
             keys = list(self.db_data.keys())
             return ResponseParser.respArray(keys)
+        
         elif (
             (all_tokens[0] == "*3" or all_tokens[0] == "*5")
             and all_tokens[1] == "$3"
@@ -66,6 +77,7 @@ class RedisServer:
                 expiry = int(time.time() * 1000) + int(all_tokens[10])
             self.store_key_value(all_tokens[4], all_tokens[6], expiry)
             return ResponseParser.respSimpleString("OK")
+        
         elif all_tokens[0] == "*2" and all_tokens[1] == "$3" and all_tokens[2] == "GET":
             key = all_tokens[4]
             if key not in self.db_data:
@@ -75,6 +87,7 @@ class RedisServer:
             if is_expired:
                 return ResponseParser.respBulkString(None)
             return ResponseParser.respBulkString(value_list[0])
+        
         elif (
             all_tokens[0] == "*3"
             and all_tokens[1] == "$6"
@@ -90,7 +103,8 @@ class RedisServer:
         elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "INFO":
             if self.replicaof is not None:
                 return ResponseParser.respBulkString("role:slave")
-            return ResponseParser.respBulkString("role:master")
+            return ResponseParser.respBulkString(f"role:master:master_replid:{self.master_replid}:master_repl_offset:{self.master_repl_offset}")
+        
         else:
             return ResponseParser.respBulkString(None)
 

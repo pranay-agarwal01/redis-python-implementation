@@ -121,10 +121,15 @@ class RedisServer:
                 print(f"DEBUG: returning - {response.encode()}")
                 connection.send(response.encode())
 
-    def perform_handshake(self, host, port):
+    def perform_handshake(self, host, port, port_to_listen_on):
         master_socket = socket.create_connection((host, port))
         master_socket.send(ResponseParser.respArray(["PING"]).encode())
-
+        master_socket.recv(1024).decode()
+        master_socket.send(ResponseParser.respArray(["REPLCONF", "listening-port", str(port_to_listen_on)]).encode())
+        master_socket.recv(1024).decode()
+        master_socket.send(ResponseParser.respArray(["REPLCONF", "capa", "psync2"]).encode())
+        master_socket.recv(1024).decode()
+        
     def parse_args(self):
         parser = argparse.ArgumentParser(description="Redis Server")
         parser.add_argument("--dir", type=str, help="Directory to store data in")
@@ -145,7 +150,7 @@ class RedisServer:
         if args.replicaof is not None:
             self.role = "slave"
             self.replicaof = args.replicaof.split(" ")
-            self.perform_handshake(self.replicaof[0], int(self.replicaof[1]))
+            self.perform_handshake(self.replicaof[0], int(self.replicaof[1]), args.port)
 
         if self.dir is not None and self.dbfilename is not None:
             rdb_file_path = os.path.join(self.dir, self.dbfilename)

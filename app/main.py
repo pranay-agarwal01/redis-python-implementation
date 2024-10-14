@@ -37,6 +37,7 @@ class RedisServer:
         self.replicaof: tuple[str, int] | None = None
         self.master_replid = create_random_alphanumeric_string(40)
         self.master_repl_offset = 0
+        self.role = "master"
 
 
     def store_key_value(self, key, value, expiry_time=None):
@@ -102,8 +103,8 @@ class RedisServer:
 
         elif all_tokens[0] == "*2" and all_tokens[1] == "$4" and all_tokens[2] == "INFO":
             if self.replicaof is not None:
-                return ResponseParser.respBulkString("role:slave")
-            return ResponseParser.respBulkString(f"role:master:master_replid:{self.master_replid}:master_repl_offset:{self.master_repl_offset}")
+                return ResponseParser.respBulkString(f"role:{self.role}")
+            return ResponseParser.respBulkString(f"role:{self.role}:master_replid:{self.master_replid}:master_repl_offset:{self.master_repl_offset}")
         
         else:
             return ResponseParser.respBulkString(None)
@@ -120,6 +121,10 @@ class RedisServer:
                 print(f"DEBUG: returning - {response.encode()}")
                 connection.send(response.encode())
 
+    def perform_handshake(self, host, port):
+        master_socket = socket.create_connection((host, port))
+        master_socket.send(ResponseParser.respArray(["PING"]).encode())
+
     def parse_args(self):
         parser = argparse.ArgumentParser(description="Redis Server")
         parser.add_argument("--dir", type=str, help="Directory to store data in")
@@ -130,7 +135,7 @@ class RedisServer:
 
     def run(self):
         args = self.parse_args()
-        print("Running redis server on port 6379")
+        print(f"Running redis server on port {args.port}")
  
         if args.dir is not None:
             self.dir = args.dir
@@ -138,7 +143,9 @@ class RedisServer:
             self.dbfilename = args.dbfilename
 
         if args.replicaof is not None:
-            self.replicaof = args.replicaof.split(":")
+            self.role = "slave"
+            self.replicaof = args.replicaof.split(" ")
+            self.perform_handshake(self.replicaof[0], int(self.replicaof[1]))
 
         if self.dir is not None and self.dbfilename is not None:
             rdb_file_path = os.path.join(self.dir, self.dbfilename)

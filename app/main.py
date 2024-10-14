@@ -109,6 +109,13 @@ class RedisServer:
         elif all_tokens[0] == "*3" and all_tokens[1] == "$8" and all_tokens[2] == "REPLCONF":
             return ResponseParser.respSimpleString("OK")
         
+        elif all_tokens[0] == "*3" and all_tokens[1] == "$5" and all_tokens[2] == "PSYNC":
+            master_id = all_tokens[4]
+            replication_offset = all_tokens[6]
+            if master_id == "?" and replication_offset == "-1":
+                return ResponseParser.respSimpleString(f"FULLRESYNC {self.master_replid} {self.master_repl_offset}")
+            return ResponseParser.respBulkString()
+        
         else:
             return ResponseParser.respBulkString(None)
 

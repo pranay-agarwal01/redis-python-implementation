@@ -127,7 +127,7 @@ class RedisServer:
         master_socket.recv(1024).decode()
         master_socket.send(ResponseParser.respArray(["REPLCONF", "listening-port", str(port_to_listen_on)]).encode())
         master_socket.recv(1024).decode()
-        master_socket.send(ResponseParser.respArray(["REPLCONF", "capa", "PSYNC"]).encode())
+        master_socket.send(ResponseParser.respArray(["REPLCONF", "capa", "psync2"]).encode())
         master_socket.recv(1024).decode()
         master_socket.send(ResponseParser.respArray(["PSYNC", "?", "-1"]).encode())
         master_socket.recv(1024).decode()

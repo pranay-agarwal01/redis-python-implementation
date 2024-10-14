@@ -106,6 +106,9 @@ class RedisServer:
                 return ResponseParser.respBulkString(f"role:{self.role}")
             return ResponseParser.respBulkString(f"role:{self.role}:master_replid:{self.master_replid}:master_repl_offset:{self.master_repl_offset}")
         
+        elif all_tokens[0] == "*3" and all_tokens[1] == "$8" and all_tokens[2] == "REPLCONF":
+            return ResponseParser.respSimpleString("OK")
+        
         else:
             return ResponseParser.respBulkString(None)
 

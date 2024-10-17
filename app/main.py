@@ -18,6 +18,9 @@ class ResponseParser:
         if message is None:
             return "$-1\r\n"
         return f"${len(message)}\r\n{message}\r\n"
+    
+    def respRDBContent(message: bytes):
+        return f"${len(message)}\r\n".encode() + message
 
     def respArray(messages: list):
         if not messages:
@@ -38,6 +41,15 @@ class RedisServer:
         self.master_replid = create_random_alphanumeric_string(40)
         self.master_repl_offset = 0
         self.role = "master"
+
+    def open_rdb_file(self):
+        rdb_file_path = "./app/dump.rdb"
+        if os.path.exists(rdb_file_path):
+            with open(rdb_file_path, "rb") as f:
+                return f.read()
+        else:
+            print("RDB file not found, returning hardcoded rdb content")
+            return b'REDIS0011\xfa\tredis-ver\x057.2.0\xfa\nredis-bits\xc0@\xfa\x05ctime\xc2m\x08\xbce\xfa\x08used-mem\xc2\xb0\xc4\x10\x00\xfa\x08aof-base\xc0\x00\xff\xf0n;\xfe\xc0\xffZ\xa2'
 
 
     def store_key_value(self, key, value, expiry_time=None):
@@ -113,7 +125,11 @@ class RedisServer:
             master_id = all_tokens[4]
             replication_offset = all_tokens[6]
             if master_id == "?" and replication_offset == "-1":
-                return ResponseParser.respSimpleString(f"FULLRESYNC {self.master_replid} {self.master_repl_offset}")
+                response = [ResponseParser.respSimpleString(f"FULLRESYNC {self.master_replid} {self.master_repl_offset}")]
+                rdb_content = self.open_rdb_file()
+                rdb_response = ResponseParser.respRDBContent(rdb_content)
+                response.append(rdb_response)
+                return response 
             return ResponseParser.respBulkString()
         
         else:
@@ -126,10 +142,19 @@ class RedisServer:
                 command: str = connection.recv(1024).decode()
                 print(f"DEBUG: recieved - {command.encode()}")
                 connected = bool(command)
-                response: str = self.command_parser(command)
+                response: str | list = self.command_parser(command)
 
-                print(f"DEBUG: returning - {response.encode()}")
-                connection.send(response.encode())
+                if isinstance(response, list):
+                    for res in response:
+                        if isinstance(res, bytes):
+                            print(f"DEBUG[bytes]: returning - {res}")
+                            connection.send(res)
+                        else:
+                            print(f"DEBUG[str]: returning - {res.encode()}")
+                            connection.send(res.encode())
+                else:
+                    print(f"DEBUG[str]: returning - {response.encode()}")
+                    connection.send(response.encode())
 
     def perform_handshake(self, host, port, port_to_listen_on):
         master_socket = socket.create_connection((host, port))

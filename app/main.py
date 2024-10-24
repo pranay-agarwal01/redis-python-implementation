@@ -7,6 +7,8 @@ import argparse
 import os
 from .rdb_parser import RDBParser
 
+all_replica_connection: list[socket.socket] = []
+
 def create_random_alphanumeric_string(length: int) -> str:
     return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(length))
 
@@ -41,6 +43,15 @@ class RedisServer:
         self.master_replid = create_random_alphanumeric_string(40)
         self.master_repl_offset = 0
         self.role = "master"
+        self.connection: socket.socket | None = None
+
+    def add_connection_master_replication_list(self, connection):
+        all_replica_connection.append(connection)
+
+    def replica_propogation_for_write_commands(self, command: str):
+        print("REPLICATING: ", command.encode())
+        for conn in all_replica_connection:
+            conn.send(command.encode())
 
     def open_rdb_file(self):
         rdb_file_path = "./app/dump.rdb"
@@ -89,6 +100,7 @@ class RedisServer:
             if len(all_tokens) > 8 and all_tokens[8] == "px":
                 expiry = int(time.time() * 1000) + int(all_tokens[10])
             self.store_key_value(all_tokens[4], all_tokens[6], expiry)
+            self.replica_propogation_for_write_commands(command)
             return ResponseParser.respSimpleString("OK")
         
         elif all_tokens[0] == "*2" and all_tokens[1] == "$3" and all_tokens[2] == "GET":
@@ -129,6 +141,7 @@ class RedisServer:
                 rdb_content = self.open_rdb_file()
                 rdb_response = ResponseParser.respRDBContent(rdb_content)
                 response.append(rdb_response)
+                self.add_connection_master_replication_list(self.connection)
                 return response 
             return ResponseParser.respBulkString()
         
@@ -137,6 +150,7 @@ class RedisServer:
 
     def connect(self, connection: socket.socket) -> None:
         with connection:
+            self.connection = connection
             connected: bool = True
             while connected:
                 command: str = connection.recv(1024).decode()

@@ -5,6 +5,7 @@ import threading
 import time
 import argparse
 import os
+import re
 from .rdb_parser import RDBParser
 
 all_replica_connection: list[socket.socket] = []
@@ -52,7 +53,7 @@ class RedisServer:
         all_replica_connection.append(connection)
 
     def replica_propogation_for_write_commands(self, command: str):
-        print("REPLICATING: ", command.encode())
+        print(f"REPLICATING: {command.encode()} to total {len(all_replica_connection)} no.of connections.")
         for conn in all_replica_connection:
             conn.send(command.encode())
 
@@ -109,7 +110,8 @@ class RedisServer:
                 expiry = int(time.time() * 1000) + int(all_tokens[10])
             self.store_key_value(all_tokens[4], all_tokens[6], expiry)
             self.replica_propogation_for_write_commands(command)
-            self.send_data(ResponseParser.respSimpleString("OK"), connection)
+            if self.role == "master":
+                self.send_data(ResponseParser.respSimpleString("OK"), connection)
 
         elif all_tokens[0] == "*2" and all_tokens[1] == "$3" and all_tokens[2] == "GET":
             key = all_tokens[4]
@@ -180,21 +182,26 @@ class RedisServer:
             else:
                 self.send_data(ResponseParser.respBulkString(None), connection)
 
-        else:
-            self.send_data(ResponseParser.respBulkString(None), connection)
-
     def connect(self, connection: socket.socket) -> None:
         with connection:
             self.connection = connection
             connected: bool = True
             while connected:
-                command: str = connection.recv(1024).decode()
-                print(f"DEBUG: recieved - {command.encode()}")
-                connected = bool(command)
-                self.command_parser(command, connection)
+                commands: str = connection.recv(1024).decode()
+                print(f"DEBUG[connection] - {connection}")
+                print(f"DEBUG: recieved - {commands.encode()}")
+                connected = bool(commands)
+                if commands:
+                    # when getting replica propagation command, we can get all command at once, hence splitting the command with '*'
+                    # example: '*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n'
+                    all_commands = re.split(r'(?=\*)', commands)[1:]
+                    for command in all_commands:
+                        if command: 
+                            self.command_parser(command, connection)
 
     def perform_handshake(self, host, port, port_to_listen_on):
         master_socket = socket.create_connection((host, port))
+        print(f"MASTER_CONNECTION - {master_socket}")
         master_socket.send(ResponseParser.respArray(["PING"]).encode())
         master_socket.recv(1024)
         master_socket.send(
@@ -209,6 +216,8 @@ class RedisServer:
         master_socket.recv(1024)
         master_socket.send(ResponseParser.respArray(["PSYNC", "?", "-1"]).encode())
         master_socket.recv(1024)
+        thread = threading.Thread(target=self.connect, args=[master_socket])
+        thread.start()
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description="Redis Server")
@@ -246,6 +255,7 @@ class RedisServer:
 
         while True:
             conn, addr = server_socket.accept()  # wait for client
+            print(f"MAIN_CONNECTION - {conn}")
             thread = threading.Thread(target=self.connect, args=[conn])
             thread.start()
 

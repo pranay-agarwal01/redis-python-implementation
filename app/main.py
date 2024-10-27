@@ -7,8 +7,10 @@ import argparse
 import os
 import re
 from .rdb_parser import RDBParser
+from .resp import ResponseParser
 
 all_replica_connection: list[socket.socket] = []
+
 
 def create_random_alphanumeric_string(length: int) -> str:
     return "".join(
@@ -53,7 +55,9 @@ class RedisServer:
         all_replica_connection.append(connection)
 
     def replica_propogation_for_write_commands(self, command: str):
-        print(f"REPLICATING: {command.encode()} to total {len(all_replica_connection)} no.of connections.")
+        print(
+            f"REPLICATING: {command.encode()} to total {len(all_replica_connection)} no.of connections."
+        )
         for conn in all_replica_connection:
             conn.send(command.encode())
 
@@ -194,9 +198,9 @@ class RedisServer:
                 if commands:
                     # when getting replica propagation command, we can get all command at once, hence splitting the command with '*'
                     # example: '*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n'
-                    all_commands = re.split(r'(?=\*)', commands)[1:]
+                    all_commands = re.split(r"(?=\*)", commands)[1:]
                     for command in all_commands:
-                        if command: 
+                        if command:
                             self.command_parser(command, connection)
 
     def perform_handshake(self, host, port, port_to_listen_on):
@@ -216,6 +220,7 @@ class RedisServer:
         master_socket.recv(1024)
         master_socket.send(ResponseParser.respArray(["PSYNC", "?", "-1"]).encode())
         master_socket.recv(1024)
+        master_socket.send(ResponseParser.respArray(["REPLCONF", "ACK", "0"]).encode())
         thread = threading.Thread(target=self.connect, args=[master_socket])
         thread.start()
 
